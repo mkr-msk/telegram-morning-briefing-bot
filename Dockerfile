@@ -9,3 +9,5 @@ COPY . .
 EXPOSE 8000
 
 CMD ["python", "main.py"]
+
+ENV PYTHONUNBUFFERED=1
