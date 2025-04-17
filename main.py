@@ -10,6 +10,7 @@ from aiohttp import web
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler, setup_application
 
 from handlers.settings import router as settings_router
+from handlers.base import router as base_router
 from services.currency import get_usd_change
 from services.news import get_top_news
 from config import BOT_TOKEN, DATABASE_URL, TIMEZONE, DOMAIN, USE_WEBHOOK
@@ -42,18 +43,18 @@ async def on_shutdown(app: web.Application):
     await bot.session.close()
     await dp.storage.close()
 
-# 1) Инициализация бота и диспетчера на глобальном уровне
+# 1) Инициализация бота и диспетчера на глобальном уровне.
 bot = Bot(
     token=BOT_TOKEN,
     default=DefaultBotProperties(parse_mode="HTML")
 )
 dp = Dispatcher()
-dp.include_routers(settings_router)
+dp.include_routers(base_router, settings_router)
 
 async def main():
     # 2) Подключение к БД
     db = await asyncpg.create_pool(DATABASE_URL)
-    dp["db"] = db
+    bot.db = db
 
     # 3) Планировщик задач
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
