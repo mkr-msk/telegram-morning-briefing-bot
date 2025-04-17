@@ -6,6 +6,7 @@ from aiogram.client.bot import DefaultBotProperties
 from aiogram.types import BotCommand
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import asyncpg
+from aiohttp import web
 
 from handlers.settings import router as settings_router
 from services.currency import get_usd_change
@@ -53,8 +54,6 @@ async def main():
         # Webhook
         await bot.delete_webhook(drop_pending_updates=True)
         await bot.set_webhook(WEBHOOK_URL)
-        from aiohttp import web
-        from aiogram.utils.webhook import configure_app
 
         app = web.Application()
         configure_app(app, dp, bot=bot, path=WEBHOOK_PATH)

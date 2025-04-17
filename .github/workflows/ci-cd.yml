@@ -1,0 +1,58 @@
+name: CI/CD Pipeline
+
+# Запускаем на каждый пуш в main
+on:
+  push:
+    branches: [master]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1) Клонируем репозиторий
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    # 2) Собираем и пушим Docker образ
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v2
+
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB_USER }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: ${{ secrets.DOCKERHUB_USER }}/telegram-briefing-bot:latest
+
+    # 3) Деплой на сервер по SSH
+    - name: Deploy to server
+      uses: appleboy/ssh-action@v0.1.7
+      with:
+        host: ${{ secrets.SERVER_HOST }}
+        username: ${{ secrets.SERVER_USER }}
+        key: ${{ secrets.SERVER_SSH_KEY }}
+        # Опционально: добавить known_hosts, если нужно
+        # known_hosts: ${{ secrets.SERVER_KNOWN_HOSTS }}
+        script: |
+          cd ~/telegram-morning-briefing-bot
+          # Обновляем репозиторий локально (если вы pull, а не clone)
+          git pull origin master
+          # Пересобираем/тянем свежий образ
+          docker pull ${{ secrets.DOCKERHUB_USER }}/telegram-briefing-bot:latest
+          # Останавливаем старый контейнер
+          docker stop briefing-bot || true
+          docker rm briefing-bot  || true
+          # Запускаем новый
+          docker run -d \
+            --name briefing-bot \
+            --restart always \
+            --env-file .env \
+            -p 8000:8000 \
+            ${{ secrets.DOCKERHUB_USER }}/telegram-briefing-bot:latest
