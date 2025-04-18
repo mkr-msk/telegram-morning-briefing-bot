@@ -23,21 +23,30 @@ WEBHOOK_URL = f"https://{DOMAIN}{WEBHOOK_PATH}"
 
 async def send_briefing(app: web.Application):
     """
-    Собирает данные и рассылает брифинг пользователям.
+    Рассылает брифинг пользователям в их указанное время.
     """
     bot: Bot = app["bot"]
     db: asyncpg.Pool = app["db"]
     try:
-        rows = await db.fetch("SELECT chat_id, notify_time, modules FROM users")
-        for chat_id, t, modules in rows:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        now = datetime.now(ZoneInfo(TIMEZONE))
+        current_time = now.replace(second=0, microsecond=0).time()
+
+        rows = await db.fetch(
+            "SELECT chat_id, modules FROM users WHERE notify_time = $1",
+            current_time
+        )
+        for chat_id, modules in rows:
             texts = []
             if "currency" in modules:
                 texts.append(await get_usd_change())
             if "news" in modules:
                 texts.append(await get_top_news())
             if texts:
-                # Объединяем текст с двумя переводами строки между блоками
-                await bot.send_message(chat_id, "\n\n".join(texts))
+                message_text = "\n\n".join(texts)
+                await bot.send_message(chat_id, message_text)
     except Exception:
         logging.exception("Ошибка при отправке брифинга")
 
@@ -45,16 +54,16 @@ async def on_startup(app: web.Application):
     """
     Инициализация БД, планировщика и webhook.
     """
-    # 1) Подключаемся к базе
+    # Подключаемся к базе
     app["db"] = await asyncpg.create_pool(DATABASE_URL)
     app["bot"].db = app["db"]
 
-    # 2) Планировщик: запуск send_briefing каждый час в 00 минут
+    # Планировщик: вызов каждую минуту, внутри функция фильтрует по времени
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
-    scheduler.add_job(send_briefing, 'cron', minute='0', args=(app,))
+    scheduler.add_job(send_briefing, 'cron', minute='*', args=(app,))
     scheduler.start()
 
-    # 3) Настройка webhook в Telegram
+    # Настройка webhook в Telegram
     bot: Bot = app["bot"]
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
@@ -69,9 +78,11 @@ async def on_shutdown(app: web.Application):
     await app["dp"].storage.close()
     await app["bot"].session.close()
 
-# Функция для создания aiohttp–приложения и интеграции Aiogram
 
 def create_app() -> web.Application:
+    """
+    Создает aiohttp-приложение и интегрирует Aiogram через webhook.
+    """
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     dp.include_router(base_router)
@@ -84,7 +95,6 @@ def create_app() -> web.Application:
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
-    # Регистрируем webhook handler
     SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
@@ -93,26 +103,28 @@ def create_app() -> web.Application:
 
     return app
 
-# Polling режим для локальной отладки
-
 async def send_briefing_poll(bot: Bot, db: asyncpg.Pool):
     """
-    Аналог send_briefing для polling: рассылает брифинг пользователям.
+    Рассылает брифинг пользователям (для polling).
     """
     try:
-        rows = await db.fetch("SELECT chat_id, notify_time, modules FROM users")
-        for chat_id, t, modules in rows:
+        rows = await db.fetch("SELECT chat_id, modules FROM users")
+        for chat_id, modules in rows:
             texts = []
             if "currency" in modules:
                 texts.append(await get_usd_change())
             if "news" in modules:
                 texts.append(await get_top_news())
             if texts:
-                await bot.send_message(chat_id, "\n\n".join(texts))
+                message_text = "\n\n".join(texts)
+                await bot.send_message(chat_id, message_text)
     except Exception:
         logging.exception("Ошибка при отправке брифинга")
 
 async def start_polling():
+    """
+    Запуск бота в режиме long polling (для локальной отладки).
+    """
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     dp.include_router(base_router)
