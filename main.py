@@ -1,10 +1,10 @@
-# main.py
 import os
 import asyncio
 import logging
 from aiohttp import web
 from aiogram import Bot, Dispatcher
 from aiogram.client.bot import DefaultBotProperties
+from aiogram.types import BotCommand
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import asyncpg
@@ -15,7 +15,7 @@ from services.currency import get_usd_change
 from services.news import get_top_news
 from config import BOT_TOKEN, DATABASE_URL, TIMEZONE, DOMAIN, USE_WEBHOOK, WEBHOOK_SECRET
 
-# Настройки webhook
+# Webhook configuration
 WEBHOOK_PATH = "/webhook/"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", "8000"))
@@ -23,7 +23,7 @@ WEBHOOK_URL = f"https://{DOMAIN}{WEBHOOK_PATH}"
 
 async def send_briefing(app: web.Application):
     """
-    Рассылает брифинг пользователям в их указанное время.
+    Send briefing to users whose notify_time matches current time.
     """
     bot: Bot = app["bot"]
     db: asyncpg.Pool = app["db"]
@@ -48,30 +48,38 @@ async def send_briefing(app: web.Application):
                 message_text = "\n\n".join(texts)
                 await bot.send_message(chat_id, message_text)
     except Exception:
-        logging.exception("Ошибка при отправке брифинга")
+        logging.exception("Error sending briefing")
 
 async def on_startup(app: web.Application):
     """
-    Инициализация БД, планировщика и webhook.
+    Initialize DB, scheduler, webhook and bot commands.
     """
-    # Подключаемся к базе
+    # Initialize database pool
     app["db"] = await asyncpg.create_pool(DATABASE_URL)
     app["bot"].db = app["db"]
 
-    # Планировщик: вызов каждую минуту, внутри функция фильтрует по времени
+    # Set bot commands
+    commands = [
+        BotCommand(command="start", description="Запустить бота"),
+        BotCommand(command="get_briefing_now", description="Получить брифинг сейчас"),
+        BotCommand(command="settings", description="Открыть настройки"),
+    ]
+    await app["bot"].set_my_commands(commands)
+
+    # Scheduler: run every minute, function filters by user time
     scheduler = AsyncIOScheduler(timezone=TIMEZONE)
     scheduler.add_job(send_briefing, 'cron', minute='*', args=(app,))
     scheduler.start()
 
-    # Настройка webhook в Telegram
+    # Configure webhook
     bot: Bot = app["bot"]
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.set_webhook(WEBHOOK_URL, secret_token=WEBHOOK_SECRET)
-    print(f"Webhook установлен: {WEBHOOK_URL}")
+    print(f"Webhook set to {WEBHOOK_URL}")
 
 async def on_shutdown(app: web.Application):
     """
-    Отмена webhook и закрытие ресурсов.
+    Cleanup on shutdown: remove webhook and close resources.
     """
     await app["bot"].delete_webhook()
     await app["db"].close()
@@ -81,20 +89,24 @@ async def on_shutdown(app: web.Application):
 
 def create_app() -> web.Application:
     """
-    Создает aiohttp-приложение и интегрирует Aiogram через webhook.
+    Create aiohttp web application with Aiogram integration.
     """
+    # Initialize bot and dispatcher
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
     dp.include_router(base_router)
     dp.include_router(settings_router)
 
+    # Create web app
     app = web.Application()
     app["bot"] = bot
     app["dp"] = dp
 
+    # Register startup and shutdown
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
+    # Register webhook handler
     SimpleRequestHandler(
         dispatcher=dp,
         bot=bot,
@@ -105,7 +117,7 @@ def create_app() -> web.Application:
 
 async def send_briefing_poll(bot: Bot, db: asyncpg.Pool):
     """
-    Рассылает брифинг пользователям (для polling).
+    Send briefing to all users (polling mode).
     """
     try:
         rows = await db.fetch("SELECT chat_id, modules FROM users")
@@ -119,11 +131,11 @@ async def send_briefing_poll(bot: Bot, db: asyncpg.Pool):
                 message_text = "\n\n".join(texts)
                 await bot.send_message(chat_id, message_text)
     except Exception:
-        logging.exception("Ошибка при отправке брифинга")
+        logging.exception("Error sending briefing (polling)")
 
 async def start_polling():
     """
-    Запуск бота в режиме long polling (для локальной отладки).
+    Run bot in long polling mode for local debugging.
     """
     bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode="HTML"))
     dp = Dispatcher()
@@ -137,7 +149,7 @@ async def start_polling():
     scheduler.add_job(send_briefing_poll, 'cron', minute='0', args=(bot, db))
     scheduler.start()
 
-    print("Запускаем polling (отладка локально)")
+    print("Starting polling mode...")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":

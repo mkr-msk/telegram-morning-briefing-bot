@@ -7,8 +7,8 @@ router = Router()
 # Главное меню
 main_kb = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text="⚙️ Настройки")],
-        [KeyboardButton(text="📨 Получить брифинг сейчас")],
+        [KeyboardButton(text="📨 Получить брифинг сейчас"),
+         KeyboardButton(text="⚙️ Настройки")],
     ],
     resize_keyboard=True
 )
